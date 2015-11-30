@@ -120,6 +120,12 @@ void driveManual() {
     motor->setSpeed(0);
     manuallyDriven = 0;
   }
+
+  if ( digitalRead( pinButtonSet ) == LOW) {
+    servo1.write(0);
+  }else{
+    servo1.write(90);
+  }
   
 }
 
@@ -179,8 +185,8 @@ void loop() {
     
   }
   
-  if( puls1000ms)
-    logStatus();
+ // if( puls1000ms)
+ //   logStatus();
 }
 
 
