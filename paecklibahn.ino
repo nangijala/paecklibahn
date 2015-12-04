@@ -3,8 +3,8 @@
 #include "utility/Adafruit_PWMServoDriver.h"
 #include <Servo.h>
 
-int oben=2688;
-int unte=0;
+int limitOben=2688;
+int limitUnten=13;
 
 const int pinGateRef = 3;
 
@@ -231,12 +231,12 @@ void driveManual() {
   if ( manuallyDriven > MANUAL_RAMPE)
     speed = HIGHSPEED;
 
-  if ( digitalRead( pinButtonUp ) == LOW) {
+  if ( digitalRead( pinButtonUp ) == LOW && position < limitOben) {
     motor->setSpeed(speed);
     motor->step(1, AUF, DOUBLE);
     manuallyDriven++;
     position++;
-  } else if ( digitalRead( pinButtonDown ) == LOW) {
+  } else if ( digitalRead( pinButtonDown ) == LOW && position > limitUnten) {
     motor->setSpeed(speed);
     motor->step(1, AB, DOUBLE);
     manuallyDriven++;
@@ -312,8 +312,8 @@ void loop() {
     
   }
   
- // if( puls1000ms)
- //   logStatus();
+ if( puls1000ms)
+    logStatus();
 }
 
 
