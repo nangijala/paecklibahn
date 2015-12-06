@@ -2,6 +2,7 @@
 #include <Adafruit_MotorShield.h>
 #include "utility/Adafruit_PWMServoDriver.h"
 #include <Servo.h>
+#include <Timer.h>
 
 int limitOben=2688;
 int limitUnten=13;
@@ -16,7 +17,7 @@ const int pinTaster = 7;
 const int pinButtonUp = 8; // rot
 const int pinManualMode = 11; // gelb: Kipp-Schalter
 
-
+Timer timer;
 Servo servo1;
 
 
@@ -224,6 +225,63 @@ void setup() {
 
 }
 
+
+
+
+class Pusher
+{
+  public:
+
+  Pusher(int pin)
+  {
+    _pinNr = pin; 
+  }
+
+  void setPowerSave()
+  {
+    servo1.write(LOW);
+    powerSave = true;
+    timerId = -1;
+  }
+  
+  void driveManual()
+  {
+
+    int buttonStatus = digitalRead( _pinNr );
+    if ( buttonStatus == LOW && powerSave == false) {
+      if( timerId == -1)
+        timerId = timer.after(2000, disableTheTopPusher);
+      servo1.write(0);
+    }else if(buttonStatus == HIGH ){
+      powerSave = false;
+      if( timerId != -1)
+      {
+        timer.stop( timerId);
+      }
+        
+      servo1.write(90);
+    }
+      
+  }
+
+
+  protected:
+  int _pinNr;
+  int timerId = -1;
+  bool powerSave = false;
+};
+
+
+
+Pusher topPusher( pinButtonSet );
+void disableTheTopPusher()
+{
+  topPusher.setPowerSave();
+}
+
+
+
+
 void driveManual() {
 
   static int manuallyDriven = 0;
@@ -246,13 +304,14 @@ void driveManual() {
     motor->release();
     manuallyDriven = 0;
   }
-
+  topPusher.driveManual();
+/*  
   if ( digitalRead( pinButtonSet ) == LOW) {
     servo1.write(0);
   }else{
     servo1.write(90);
   }
-  
+ */ 
 }
 
 void logStatus() {
@@ -297,7 +356,7 @@ void updateTimer(){
 
   
 void loop() {
-
+  timer.update();
   updateTimer();
   
   if ( digitalRead( pinManualMode ) == LOW) {
