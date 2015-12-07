@@ -126,9 +126,6 @@ public:
     theServo.write(direction);        
     
   }
-  
-private:
-
 
 };
 
@@ -209,6 +206,14 @@ void resetRefPoint(){
   statusRefPointDrive = REF_STATE_UNKNOWN;
 }
 
+
+
+
+
+#define AUTO_RAMPE 50
+
+class Pusher;
+
 void setup() {
 
   Serial.begin(9600);
@@ -220,6 +225,7 @@ void setup() {
   pinMode(pinButtonSet, INPUT_PULLUP);
   pinMode(pinManualMode, INPUT_PULLUP);
   pinMode(pinReference, INPUT_PULLUP);
+  pinMode(pinTaster, INPUT_PULLUP);
 
   theCatcher.setup();
 
@@ -237,28 +243,27 @@ class Pusher
     _pinNr = pin; 
   }
 
-  void setPowerSave()
-  {
-    servo1.write(LOW);
-    powerSave = true;
-    timerId = -1;
+
+
+  void drive( bool shouldKick ){
+    if ( shouldKick ) {
+
+      servo1.write(0);
+    }else if(!shouldKick){
+      servo1.write(90);
+    }    
   }
+
   
   void driveManual()
   {
 
     int buttonStatus = digitalRead( _pinNr );
-    if ( buttonStatus == LOW && powerSave == false) {
-      if( timerId == -1)
-        timerId = timer.after(2000, disableTheTopPusher);
+    if ( buttonStatus == LOW) {
       servo1.write(0);
-    }else if(buttonStatus == HIGH ){
-      powerSave = false;
-      if( timerId != -1)
-      {
-        timer.stop( timerId);
-      }
-        
+
+    }else if(buttonStatus == HIGH   ){
+      // button not pressed           
       servo1.write(90);
     }
       
@@ -274,10 +279,7 @@ class Pusher
 
 
 Pusher topPusher( pinButtonSet );
-void disableTheTopPusher()
-{
-  topPusher.setPowerSave();
-}
+
 
 
 
@@ -314,30 +316,6 @@ void driveManual() {
  */ 
 }
 
-void logStatus() {
-
-    Serial.print("UP:");
-    Serial.print(digitalRead(pinButtonUp));
-    Serial.print(" DN:");
-    Serial.print(digitalRead(pinButtonDown));
-    Serial.print(" ST:");
-    Serial.print(digitalRead(pinButtonSet));
-    Serial.print(" RF:");
-    Serial.print(digitalRead(pinReference));
-    Serial.print(" TS:");
-    Serial.print(digitalRead(pinTaster));
-
-    if ( digitalRead(pinManualMode) == LOW)
-      Serial.print(" Mode:M");
-    else
-      Serial.print(" Mode:A");
-
-    Serial.print(" Pos:");
-    Serial.println(position);
- 
-}
-
-
 
 void updateTimer(){
   static long previousMillis = 0;
@@ -352,7 +330,220 @@ void updateTimer(){
 
 }
 
+#define AUT_STATE_UNKNOWN 0
+#define AUT_STATE_LOWER 1
+#define AUT_STATE_LOAD 2
+#define AUT_STATE_WAIT_FOR_LOAD 3
+#define AUT_STATE_RAISE 10
+#define AUT_STATE_UNLOAD 11
+#define AUT_STATE_WAIT_FOR_UNLOAD 12
 
+class AutoPilot{
+  public:
+  int state=AUT_STATE_UNKNOWN;
+  int oldState = -1;
+  AutoPilot(int sensorPin, Catcher *theCatcher, Pusher *thePusher)
+  {
+    state = AUT_STATE_UNKNOWN;
+    _sensorPin = sensorPin;
+    _theCatcher = theCatcher;
+    _thePusher = thePusher;
+  }
+  
+  void updateFromTimer()
+  {
+    if( state == AUT_STATE_WAIT_FOR_LOAD)
+    {
+      state = AUT_STATE_RAISE;
+    }
+    else if( state == AUT_STATE_WAIT_FOR_UNLOAD)
+    {
+      state = AUT_STATE_LOWER;
+    }
+  }
+  
+  void updateManual()
+  {
+    if( timerId != -1){
+      timer.stop(timerId);
+      timerId = -1;
+    }
+    shouldPusherKick = false;
+    state = AUT_STATE_UNKNOWN;
+  }
+  
+  void update()
+  {
+    oldState = state;
+    isLoaded = digitalRead(_sensorPin) == LOW ? true : false;
+    if( state == AUT_STATE_UNKNOWN )
+      state = findFirstStep();
+      
+    switch( state ){
+      case AUT_STATE_LOWER:
+        stepLower();
+      break;
+
+      case AUT_STATE_LOAD:
+        stepLoad();
+      break;
+
+      case AUT_STATE_WAIT_FOR_LOAD:
+        stepWaitForLoad();
+      break;
+
+      case AUT_STATE_RAISE:
+        stepRaise();
+      break;
+            
+      case AUT_STATE_UNLOAD:
+        stepUnLoad();
+      break;
+      
+      case AUT_STATE_WAIT_FOR_UNLOAD:
+        stepWaitForUnLoad();
+      break;  
+       
+      default:
+      ;
+    };
+    if( oldState != state){
+      Serial.println( "State Changed"); 
+     }
+    _theCatcher->drive(shouldCatcherOpen);
+    _thePusher->drive(shouldPusherKick);
+
+  }
+
+protected:
+
+  int findFirstStep(){
+    if( isLoaded == true)
+      return AUT_STATE_RAISE;
+    else
+      return AUT_STATE_LOWER;
+   }
+
+   void stepLower()
+   {
+      if( drive(AB) == true)
+        state = AUT_STATE_LOAD;
+   }
+   
+  void stepLoad()
+  {
+    shouldCatcherOpen = true;
+    if( isLoaded )
+    {
+      timer.after(1000,updatePilotFromTimer);
+      state = AUT_STATE_WAIT_FOR_LOAD;
+    }
+  }
+  
+  void stepWaitForLoad()
+  {
+    shouldCatcherOpen = false;
+  }
+  
+  void stepRaise()
+  {
+    if( drive(AUF) == true)
+      state = AUT_STATE_UNLOAD;
+  }
+
+  void stepUnLoad()
+  {
+    shouldPusherKick = true;
+    if( isLoaded == false )
+    {
+      timer.after(2000,updatePilotFromTimer);
+      state = AUT_STATE_WAIT_FOR_UNLOAD;
+    }
+    
+  }
+
+
+
+  void stepWaitForUnLoad()
+  {
+    shouldPusherKick = false;    
+  }
+
+  
+  boolean drive( int direction) {
+  
+    int speed = LOWSPEED;
+    if ( manuallyDriven > AUTO_RAMPE)
+      speed = HIGHSPEED;
+  
+    if ( direction == AUF && position < limitOben) {
+      motor->setSpeed(speed);
+      motor->step(1, AUF, DOUBLE);
+      manuallyDriven++;
+      position++;
+    } else if ( direction == AB && position > limitUnten) {
+      motor->setSpeed(speed);
+      motor->step(1, AB, DOUBLE);
+      manuallyDriven++;
+      position--;
+    } else {
+      motor->setSpeed(0);
+      motor->release();
+      manuallyDriven = 0;
+      if(( direction == AUF && position >= limitOben) || ( direction == AB && position <= limitUnten) )
+        return true;      
+    }
+
+    return false;
+}
+
+  
+
+  int _sensorPin;
+  int timerId = -1;
+  Catcher *_theCatcher;
+  Pusher* _thePusher;
+  
+  boolean isLoaded = false;
+  int manuallyDriven = 0;
+  boolean shouldCatcherOpen = false;
+  boolean shouldPusherKick = false;
+};
+
+
+AutoPilot pilot( pinTaster, &theCatcher, &topPusher);
+
+void updatePilotFromTimer()
+{
+  pilot.updateFromTimer();
+}
+
+
+void logStatus() {
+
+    Serial.print("UP:");
+    Serial.print(digitalRead(pinButtonUp));
+    Serial.print(" DN:");
+    Serial.print(digitalRead(pinButtonDown));
+    Serial.print(" ST:");
+    Serial.print(digitalRead(pinButtonSet));
+    Serial.print(" RF:");
+    Serial.print(digitalRead(pinReference));
+    Serial.print(" TS:");
+    Serial.print(digitalRead(pinTaster));
+    Serial.print(" RP:");
+    Serial.print(statusRefPointDrive);    
+    if ( digitalRead(pinManualMode) == LOW)
+      Serial.print(" Mode:M");
+    else
+      Serial.print(" Mode:A");
+    Serial.print(" AP:");
+    Serial.print(pilot.state);
+
+    Serial.print(" Pos:");
+    Serial.println(position);
+ 
+}
 
   
 void loop() {
@@ -363,10 +554,11 @@ void loop() {
     driveManual();
     theCatcher.drive( digitalRead( pinButtonSet ) == LOW);
     resetRefPoint();
+    pilot.updateManual();
   }else{
     //Automatic
     if( checkRefPoint() ){
-        
+      pilot.update();  
     }
     
   }
