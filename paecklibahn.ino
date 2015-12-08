@@ -358,6 +358,7 @@ class AutoPilot{
     }
     else if( state == AUT_STATE_WAIT_FOR_UNLOAD)
     {
+      shouldPusherKick = false;
       state = AUT_STATE_LOWER;
     }
   }
@@ -456,7 +457,7 @@ protected:
     shouldPusherKick = true;
     if( isLoaded == false )
     {
-      timer.after(2000,updatePilotFromTimer);
+      timerId = timer.after(2000,updatePilotFromTimer);
       state = AUT_STATE_WAIT_FOR_UNLOAD;
     }
     
@@ -466,7 +467,13 @@ protected:
 
   void stepWaitForUnLoad()
   {
-    shouldPusherKick = false;    
+    if( isLoaded == true){
+        if( timerId != -1){
+          timer.stop(timerId);
+          timerId = -1;
+        }      
+       state = AUT_STATE_UNLOAD;
+    }
   }
 
   
