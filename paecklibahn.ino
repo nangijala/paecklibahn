@@ -307,13 +307,7 @@ void driveManual() {
     manuallyDriven = 0;
   }
   topPusher.driveManual();
-/*  
-  if ( digitalRead( pinButtonSet ) == LOW) {
-    servo1.write(0);
-  }else{
-    servo1.write(90);
-  }
- */ 
+  
 }
 
 
@@ -337,11 +331,16 @@ void updateTimer(){
 #define AUT_STATE_RAISE 10
 #define AUT_STATE_UNLOAD 11
 #define AUT_STATE_WAIT_FOR_UNLOAD 12
+#define AUT_STATE_MAKE_TIMEOUT 20
+
+#define MOVES_BEFORE_REF 20
+#define TIMEOUT_DURATION 30000
 
 class AutoPilot{
   public:
   int state=AUT_STATE_UNKNOWN;
   int oldState = -1;
+  
   AutoPilot(int sensorPin, Catcher *theCatcher, Pusher *thePusher)
   {
     state = AUT_STATE_UNKNOWN;
@@ -354,10 +353,15 @@ class AutoPilot{
   {
     if( state == AUT_STATE_WAIT_FOR_LOAD)
     {
-      state = AUT_STATE_RAISE;
-    }
-    else if( state == AUT_STATE_WAIT_FOR_UNLOAD)
-    {
+      if( TIMEOUT_DURATION <= 0){
+        state = AUT_STATE_RAISE;
+      }else{
+        timer.after(TIMEOUT_DURATION,updatePilotFromTimer);
+        state = AUT_STATE_MAKE_TIMEOUT;
+       }
+    }else if( state == AUT_STATE_MAKE_TIMEOUT ){
+      state = AUT_STATE_RAISE;      
+    }else if( state == AUT_STATE_WAIT_FOR_UNLOAD){
       shouldPusherKick = false;
       state = AUT_STATE_LOWER;
     }
@@ -371,6 +375,7 @@ class AutoPilot{
     }
     shouldPusherKick = false;
     state = AUT_STATE_UNKNOWN;
+    moveCounter = 0;
   }
   
   void update()
@@ -425,10 +430,17 @@ protected:
       return AUT_STATE_LOWER;
    }
 
+
    void stepLower()
    {
-      if( drive(AB) == true)
-        state = AUT_STATE_LOAD;
+      if( drive(AB) == true){
+        moveCounter++;
+        if( moveCounter < MOVES_BEFORE_REF){
+          statusRefPointDrive == REF_STATE_UNKNOWN;
+          state = AUT_STATE_UNKNOWN;
+        }else
+          state = AUT_STATE_LOAD;
+      }
    }
    
   void stepLoad()
@@ -459,8 +471,7 @@ protected:
     {
       timerId = timer.after(2000,updatePilotFromTimer);
       state = AUT_STATE_WAIT_FOR_UNLOAD;
-    }
-    
+    }    
   }
 
 
@@ -502,7 +513,7 @@ protected:
     }
 
     return false;
-}
+   }
 
   
 
@@ -515,6 +526,7 @@ protected:
   int manuallyDriven = 0;
   boolean shouldCatcherOpen = false;
   boolean shouldPusherKick = false;
+  int moveCounter = 0;
 };
 
 
