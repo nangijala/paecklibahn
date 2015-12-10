@@ -13,6 +13,7 @@ int limitUnten=13;
 // Debug level loggin
 #define VERBOSE false
 
+// Application loggin 
 #define STATUSLOGGING true
 
 const int pinRes1 = 1;
@@ -148,7 +149,6 @@ Catcher theCatcher(pinServoCatcher,pinGateRef);
 #define AUF BACKWARD
 #define HIGHSPEED 800
 #define LOWSPEED 100
-#define MANUAL_RAMPE 200
 
 
 
@@ -156,71 +156,155 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_StepperMotor *motor = AFMS.getStepper(200, 2);
 
 int position = 0;
+//
+//#define REF_STATE_UNKNOWN 0
+//#define REF_STATE_LIFTOUT 1
+//#define REF_STATE_LIFTOUT_SPACE 2
+//#define REF_STATE_SEARCH 3
+//#define REF_STATE_DONE 4
+//
+//byte statusRefPointDrive = REF_STATE_UNKNOWN;
+//
+//void liftOutDone(){
+//  statusRefPointDrive = REF_STATE_SEARCH;   
+//}
+//
+//
+//bool checkRefPoint(){
+//  
+//  if (statusRefPointDrive == REF_STATE_DONE)
+//    return true;
+//    
+//   int refSwitch = digitalRead( pinReference ); 
+//    
+//  if (statusRefPointDrive == REF_STATE_UNKNOWN && refSwitch == LOW ){
+//    statusRefPointDrive = REF_STATE_LIFTOUT;
+//  }else if(statusRefPointDrive == REF_STATE_LIFTOUT && refSwitch == HIGH){
+//    statusRefPointDrive = REF_STATE_LIFTOUT_SPACE;
+//    timer.after(2000,liftOutDone);
+//  }else if(statusRefPointDrive == REF_STATE_LIFTOUT_SPACE)  {
+//  /*  
+//   Remain in this step until liftOutDone time-out hits
+//     */
+//  }else if(statusRefPointDrive == REF_STATE_SEARCH && refSwitch == LOW){
+//    statusRefPointDrive = REF_STATE_DONE; 
+//    position = 0;
+//  }else if(statusRefPointDrive == REF_STATE_UNKNOWN && refSwitch == HIGH ){
+//    statusRefPointDrive = REF_STATE_SEARCH; 
+//  }
+//
+//  if( statusRefPointDrive == REF_STATE_LIFTOUT_SPACE || statusRefPointDrive == REF_STATE_LIFTOUT){
+//    motor->setSpeed(LOWSPEED);
+//    motor->step(1, AUF, DOUBLE);
+//   }else if (statusRefPointDrive == REF_STATE_SEARCH)  {
+//    motor->setSpeed(LOWSPEED);
+//    motor->step(1, AB, DOUBLE);    
+//   }else{
+//    motor->setSpeed(0);
+//    motor->release();
+//   }   
+//  
+//  return false;
+//}
+//
+//void resetRefPoint(){
+//  statusRefPointDrive = REF_STATE_UNKNOWN;
+//}
+//
 
-#define REF_STATE_UNKNOWN 0
-#define REF_STATE_LIFTOUT 1
-#define REF_STATE_LIFTOUT_SPACE 2
-#define REF_STATE_SEARCH 3
-#define REF_STATE_DONE 4
+void terminateLiftOut();
 
+class RefPointSearch{
 
-
-byte statusRefPointDrive = REF_STATE_UNKNOWN;
-
-void liftOutDone(){
-  statusRefPointDrive = REF_STATE_SEARCH;   
-}
-
-
-bool checkRefPoint(){
-  static int countLiftOut = 0;
-  if (statusRefPointDrive == REF_STATE_DONE)
-    return true;
-    
-   int refSwitch = digitalRead( pinReference ); 
-    
-  if (statusRefPointDrive == REF_STATE_UNKNOWN && refSwitch == LOW ){
-    statusRefPointDrive = REF_STATE_LIFTOUT;
-  }else if(statusRefPointDrive == REF_STATE_LIFTOUT && refSwitch == HIGH){
-    statusRefPointDrive = REF_STATE_LIFTOUT_SPACE;
-    timer.after(2000,liftOutDone);
-  }else if(statusRefPointDrive == REF_STATE_LIFTOUT_SPACE)  {
-  /*  
-   Remain in this step until liftOutDone time-out hits
-     */
-  }else if(statusRefPointDrive == REF_STATE_SEARCH && refSwitch == LOW){
-    statusRefPointDrive = REF_STATE_DONE; 
-    position = 0;
-  }else if(statusRefPointDrive == REF_STATE_UNKNOWN && refSwitch == HIGH ){
-    statusRefPointDrive = REF_STATE_SEARCH; 
+public:
+  int state = RefPointSearch::STATE_UNKNOWN;
+  
+  RefPointSearch(int pin){
+    _pin = pin;
   }
 
-  if( statusRefPointDrive == REF_STATE_LIFTOUT_SPACE || statusRefPointDrive == REF_STATE_LIFTOUT){
-    motor->setSpeed(LOWSPEED);
-    motor->step(1, AUF, DOUBLE);
-   }else if (statusRefPointDrive == REF_STATE_SEARCH)  {
-    motor->setSpeed(LOWSPEED);
-    motor->step(1, AB, DOUBLE);    
-   }else{
-    motor->setSpeed(0);
-    motor->release();
-   }   
+  void reset()
+  {
+    state = STATE_UNKNOWN;
+    if( isMoving)
+      moveLift();
+  }
   
-  return false;
+  void handeLiftOutTimer()
+  {
+    timerId = -1;
+    if( state == STATE_LIFTOUT_SPACE )
+      state = STATE_SEARCH;
+  }
+  
+  bool checkState()
+  {
+    refSwitchTouched = digitalRead(_pin) == LOW ? true : false;
+    if( state == STATE_UNKNOWN ){
+      if( refSwitchTouched)
+        state = STATE_LIFTOUT;
+       else
+        state = STATE_SEARCH;
+    }else if( state == STATE_LIFTOUT){
+      if( refSwitchTouched ){
+        state = STATE_LIFTOUT_SPACE;
+        timerId = timer.after( 1500, terminateLiftOut);
+      }
+    }else if( state == STATE_LIFTOUT_SPACE){
+      // Do nothing, wait for timer
+    }else if( state == STATE_SEARCH){
+      if( refSwitchTouched){
+        position = 0;
+        state = STATE_DONE;
+      }
+    }else if( state == STATE_DONE){
+      
+    }
+    moveLift();
+    return state == STATE_DONE ? true : false;
+  }
+
+
+  
+protected:
+
+  void moveLift()
+  {
+
+    isMoving = true;    
+    if( state == STATE_LIFTOUT_SPACE || state == STATE_LIFTOUT){
+      motor->setSpeed(LOWSPEED);
+      motor->step(1, AUF, DOUBLE);      
+     }else if (state == STATE_SEARCH)  {
+      motor->setSpeed(LOWSPEED);
+      motor->step(1, AB, DOUBLE);    
+     }else{
+      motor->setSpeed(0);
+      motor->release();
+      isMoving = false;
+     }      
+  }
+
+  int _pin;
+  bool refSwitchTouched = false;
+  bool isMoving = false;
+  int timerId = -1;
+  
+  const int STATE_UNKNOWN = 0;
+  const int STATE_LIFTOUT = 1;
+  const int STATE_LIFTOUT_SPACE = 2;
+  const int STATE_SEARCH = 3;
+  const int STATE_DONE = 4;
+  
+};
+
+
+
+RefPointSearch refPoint( pinReference );
+
+void terminateLiftOut(){
+  refPoint.handeLiftOutTimer();
 }
-
-void resetRefPoint(){
-  statusRefPointDrive = REF_STATE_UNKNOWN;
-}
-
-
-
-
-
-#define AUTO_RAMPE 50
-
-
-
 
 
 
@@ -269,6 +353,7 @@ Pusher topPusher( pinButtonSet );
 
 
 
+#define MANUAL_RAMPE 200
 
 
 void driveManual() {
@@ -298,6 +383,8 @@ void driveManual() {
 }
 
 
+#define AUTO_RAMPE 50
+
 #define AUT_STATE_UNKNOWN 0
 #define AUT_STATE_LOWER 1
 #define AUT_STATE_LOAD 2
@@ -306,7 +393,7 @@ void driveManual() {
 #define AUT_STATE_UNLOAD 11
 #define AUT_STATE_WAIT_FOR_UNLOAD 12
 #define AUT_STATE_MAKE_TIMEOUT 20
-
+#define AUT_STATE_REF_POINT 30
 
 
 class AutoPilot{
@@ -413,9 +500,8 @@ protected:
       if( drive(AB) == true){
         moveCounter++;
         if( moveCounter >= MOVES_BEFORE_REF){
-          statusRefPointDrive = REF_STATE_UNKNOWN;
-          state = AUT_STATE_UNKNOWN;
-          moveCounter = 0;
+          refPoint.reset();
+          state = AUT_STATE_REF_POINT;
         }else
           state = AUT_STATE_LOAD;
       }
@@ -528,8 +614,8 @@ void logStatus() {
     Serial.print(digitalRead(pinReference));
     Serial.print(" TS:");
     Serial.print(digitalRead(pinTaster));
-    Serial.print(" RP:");
-    Serial.print(statusRefPointDrive);    
+//    Serial.print(" RP:");
+//    Serial.print(statusRefPointDrive);    
     if ( digitalRead(pinManualMode) == LOW)
       Serial.print(" Mode:M");
     else
@@ -570,13 +656,15 @@ void loop() {
   if ( digitalRead( pinManualMode ) == LOW) {
     driveManual();
     theCatcher.drive( digitalRead( pinButtonSet ) == LOW);
-    resetRefPoint();
+    refPoint.reset();
     pilot.updateManual();
   }else{
     //Automatic
-    if( checkRefPoint() ){
+    if( refPoint.checkState() ){
       pilot.update();  
-    }    
+    }else{
+      pilot.updateManual();   
+    }
   } 
 }
 
