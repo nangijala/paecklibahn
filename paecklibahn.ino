@@ -10,6 +10,11 @@ int limitUnten=13;
 #define MOVES_BEFORE_REF 3
 #define TIMEOUT_DURATION 0
 
+// Debug level loggin
+#define VERBOSE false
+
+#define STATUSLOGGING true
+
 const int pinRes1 = 1;
 const int pinRes2 = 2;
 const int pinGateRef = 3;    // Position of catcher
@@ -103,19 +108,20 @@ public:
      previousMillisGate = m;
      wasSeen = false;
      isDriving = true;
-     if( direction == SERVO_FORW )
-       Serial.println("Open SERVO_FORW");
-      else
-       Serial.println("Open SERVO_BACK");
-  
+     if( VERBOSE ){
+       if( direction == SERVO_FORW )
+         Serial.println("Open SERVO_FORW");
+        else
+         Serial.println("Open SERVO_BACK");
+     }
     }else if( m - previousMillisGate >= MOVING_TIME || (digitalRead(_refPin) == LOW && direction == SERVO_BACK)){
-     Serial.println( m - previousMillisGate );
+     if( VERBOSE )  Serial.println( m - previousMillisGate );
      if( direction == SERVO_FORW ){
        isOpen = true;
-       Serial.println("Gate open");
+       if( VERBOSE ) Serial.println("Gate open");
      }else{
        isOpen = false;
-       Serial.println("Gate closed");
+       if( VERBOSE ) Serial.println("Gate closed");
        if( digitalRead(_refPin) == HIGH){
          if(wasSeen == false)
            initDirection = SERVO_BACK;
@@ -144,7 +150,6 @@ Catcher theCatcher(pinServoCatcher,pinGateRef);
 #define LOWSPEED 100
 #define MANUAL_RAMPE 200
 
-bool puls1000ms = false;
 
 
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
@@ -178,14 +183,10 @@ bool checkRefPoint(){
     statusRefPointDrive = REF_STATE_LIFTOUT;
   }else if(statusRefPointDrive == REF_STATE_LIFTOUT && refSwitch == HIGH){
     statusRefPointDrive = REF_STATE_LIFTOUT_SPACE;
-//    countLiftOut = 0;    
     timer.after(2000,liftOutDone);
   }else if(statusRefPointDrive == REF_STATE_LIFTOUT_SPACE)  {
   /*  
-    if(puls1000ms)
-      countLiftOut++; 
-    if( countLiftOut > 2)
-      statusRefPointDrive = REF_STATE_SEARCH;    
+   Remain in this step until liftOutDone time-out hits
      */
   }else if(statusRefPointDrive == REF_STATE_SEARCH && refSwitch == LOW){
     statusRefPointDrive = REF_STATE_DONE; 
@@ -218,24 +219,7 @@ void resetRefPoint(){
 
 #define AUTO_RAMPE 50
 
-class Pusher;
 
-void setup() {
-
-  Serial.begin(9600);
-
-  AFMS.begin();
-  servo1.attach(pinServoPusher);
-  pinMode(pinButtonUp, INPUT_PULLUP);
-  pinMode(pinButtonDown, INPUT_PULLUP);
-  pinMode(pinButtonSet, INPUT_PULLUP);
-  pinMode(pinManualMode, INPUT_PULLUP);
-  pinMode(pinReference, INPUT_PULLUP);
-  pinMode(pinTaster, INPUT_PULLUP);
-  timer.every(1000, logStatus);
-  theCatcher.setup();
-
-}
 
 
 
@@ -313,19 +297,6 @@ void driveManual() {
   
 }
 
-
-void updateTimer(){
-  static long previousMillis = 0;
-  unsigned long currentMillis = millis();
-  
-  if (currentMillis - previousMillis >= 1000) {
-    previousMillis = currentMillis;
-    puls1000ms = true;
-  }else{
-    puls1000ms = false; 
-  }
-
-}
 
 #define AUT_STATE_UNKNOWN 0
 #define AUT_STATE_LOWER 1
@@ -416,8 +387,11 @@ class AutoPilot{
       default:
       ;
     };
-    if( oldState != state){
-      Serial.println( "State Changed"); 
+    if( oldState != state && VERBOSE){
+      Serial.print( "State Changed: "); 
+      Serial.print( oldState );
+      Serial.print( " -> " );
+      Serial.println( state );
      }
     _theCatcher->drive(shouldCatcherOpen);
     _thePusher->drive(shouldPusherKick);
@@ -571,6 +545,24 @@ void logStatus() {
  
 }
 
+void setup() {
+
+  Serial.begin(9600);
+
+  AFMS.begin();
+  servo1.attach(pinServoPusher);
+  pinMode(pinButtonUp, INPUT_PULLUP);
+  pinMode(pinButtonDown, INPUT_PULLUP);
+  pinMode(pinButtonSet, INPUT_PULLUP);
+  pinMode(pinManualMode, INPUT_PULLUP);
+  pinMode(pinReference, INPUT_PULLUP);
+  pinMode(pinTaster, INPUT_PULLUP);
+  if( STATUSLOGGING )
+    timer.every(1000, logStatus);
+  theCatcher.setup();
+
+}
+
   
 void loop() {
   timer.update();
@@ -584,10 +576,8 @@ void loop() {
     //Automatic
     if( checkRefPoint() ){
       pilot.update();  
-    }
-    
-  }
- 
+    }    
+  } 
 }
 
 
