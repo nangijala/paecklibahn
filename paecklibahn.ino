@@ -7,14 +7,19 @@
 int limitOben=2688;
 int limitUnten=13;
 
-const int pinGateRef = 3;
+#define MOVES_BEFORE_REF 3
+#define TIMEOUT_DURATION 0
 
-const int pinButtonDown = 4; // gruen
-const int pinButtonSet = 5; // blau
-
+const int pinRes1 = 1;
+const int pinRes2 = 2;
+const int pinGateRef = 3;    // Position of catcher
+const int pinButtonDown = 4; // Green button
+const int pinButtonSet = 5; // Blue button
 const int pinReference = 6; // weiss:refernzfahrt
-const int pinTaster = 7;
-const int pinButtonUp = 8; // rot
+const int pinTaster = 7; // Checks load
+const int pinButtonUp = 8; // Red button
+const int pinServoCatcher = 9;
+const int pinServoPusher = 10;
 const int pinManualMode = 11; // gelb: Kipp-Schalter
 
 Timer timer;
@@ -129,18 +134,12 @@ public:
 
 };
 
-
-
-
-
-Catcher theCatcher(9,pinGateRef);
+Catcher theCatcher(pinServoCatcher,pinGateRef);
 
 
 
 #define AB FORWARD
 #define AUF BACKWARD
-
-
 #define HIGHSPEED 800
 #define LOWSPEED 100
 #define MANUAL_RAMPE 200
@@ -163,6 +162,10 @@ int position = 0;
 
 byte statusRefPointDrive = REF_STATE_UNKNOWN;
 
+void liftOutDone(){
+  statusRefPointDrive = REF_STATE_SEARCH;   
+}
+
 
 bool checkRefPoint(){
   static int countLiftOut = 0;
@@ -175,12 +178,15 @@ bool checkRefPoint(){
     statusRefPointDrive = REF_STATE_LIFTOUT;
   }else if(statusRefPointDrive == REF_STATE_LIFTOUT && refSwitch == HIGH){
     statusRefPointDrive = REF_STATE_LIFTOUT_SPACE;
-    countLiftOut = 0;    
+//    countLiftOut = 0;    
+    timer.after(2000,liftOutDone);
   }else if(statusRefPointDrive == REF_STATE_LIFTOUT_SPACE)  {
+  /*  
     if(puls1000ms)
       countLiftOut++; 
     if( countLiftOut > 2)
       statusRefPointDrive = REF_STATE_SEARCH;    
+     */
   }else if(statusRefPointDrive == REF_STATE_SEARCH && refSwitch == LOW){
     statusRefPointDrive = REF_STATE_DONE; 
     position = 0;
@@ -219,14 +225,14 @@ void setup() {
   Serial.begin(9600);
 
   AFMS.begin();
-  servo1.attach(10);
+  servo1.attach(pinServoPusher);
   pinMode(pinButtonUp, INPUT_PULLUP);
   pinMode(pinButtonDown, INPUT_PULLUP);
   pinMode(pinButtonSet, INPUT_PULLUP);
   pinMode(pinManualMode, INPUT_PULLUP);
   pinMode(pinReference, INPUT_PULLUP);
   pinMode(pinTaster, INPUT_PULLUP);
-
+  timer.every(1000, logStatus);
   theCatcher.setup();
 
 }
@@ -272,10 +278,7 @@ class Pusher
 
   protected:
   int _pinNr;
-  int timerId = -1;
-  bool powerSave = false;
 };
-
 
 
 Pusher topPusher( pinButtonSet );
@@ -333,13 +336,13 @@ void updateTimer(){
 #define AUT_STATE_WAIT_FOR_UNLOAD 12
 #define AUT_STATE_MAKE_TIMEOUT 20
 
-#define MOVES_BEFORE_REF 20
-#define TIMEOUT_DURATION 30000
+
 
 class AutoPilot{
   public:
   int state=AUT_STATE_UNKNOWN;
   int oldState = -1;
+  int moveCounter = 0;
   
   AutoPilot(int sensorPin, Catcher *theCatcher, Pusher *thePusher)
   {
@@ -435,9 +438,10 @@ protected:
    {
       if( drive(AB) == true){
         moveCounter++;
-        if( moveCounter < MOVES_BEFORE_REF){
-          statusRefPointDrive == REF_STATE_UNKNOWN;
+        if( moveCounter >= MOVES_BEFORE_REF){
+          statusRefPointDrive = REF_STATE_UNKNOWN;
           state = AUT_STATE_UNKNOWN;
+          moveCounter = 0;
         }else
           state = AUT_STATE_LOAD;
       }
@@ -526,7 +530,7 @@ protected:
   int manuallyDriven = 0;
   boolean shouldCatcherOpen = false;
   boolean shouldPusherKick = false;
-  int moveCounter = 0;
+
 };
 
 
@@ -558,6 +562,9 @@ void logStatus() {
       Serial.print(" Mode:A");
     Serial.print(" AP:");
     Serial.print(pilot.state);
+    
+    Serial.print(" MV:");
+    Serial.print(pilot.moveCounter);    
 
     Serial.print(" Pos:");
     Serial.println(position);
@@ -567,7 +574,6 @@ void logStatus() {
   
 void loop() {
   timer.update();
-  updateTimer();
   
   if ( digitalRead( pinManualMode ) == LOW) {
     driveManual();
@@ -581,9 +587,7 @@ void loop() {
     }
     
   }
-  
- if( puls1000ms)
-    logStatus();
+ 
 }
 
 
