@@ -4,17 +4,17 @@
 #include <Servo.h>
 #include <Timer.h>
 
-int limitOben=2688;
+int limitOben=2691;
 int limitUnten=13;
 
-#define MOVES_BEFORE_REF 3
-#define TIMEOUT_DURATION 0
+#define MOVES_BEFORE_REF 15
+#define TIMEOUT_DURATION 8000
 
-// Debug level loggin
+// Debug level logging
 #define VERBOSE false
 
 // Application loggin 
-#define STATUSLOGGING true
+#define STATUSLOGGING false
 
 const int pinRes1 = 1;
 const int pinRes2 = 2;
@@ -147,6 +147,8 @@ Catcher theCatcher(pinServoCatcher,pinGateRef);
 
 #define AB FORWARD
 #define AUF BACKWARD
+#define DONTMOVE RELEASE
+
 #define HIGHSPEED 800
 #define LOWSPEED 100
 
@@ -156,61 +158,7 @@ Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_StepperMotor *motor = AFMS.getStepper(200, 2);
 
 int position = 0;
-//
-//#define REF_STATE_UNKNOWN 0
-//#define REF_STATE_LIFTOUT 1
-//#define REF_STATE_LIFTOUT_SPACE 2
-//#define REF_STATE_SEARCH 3
-//#define REF_STATE_DONE 4
-//
-//byte statusRefPointDrive = REF_STATE_UNKNOWN;
-//
-//void liftOutDone(){
-//  statusRefPointDrive = REF_STATE_SEARCH;   
-//}
-//
-//
-//bool checkRefPoint(){
-//  
-//  if (statusRefPointDrive == REF_STATE_DONE)
-//    return true;
-//    
-//   int refSwitch = digitalRead( pinReference ); 
-//    
-//  if (statusRefPointDrive == REF_STATE_UNKNOWN && refSwitch == LOW ){
-//    statusRefPointDrive = REF_STATE_LIFTOUT;
-//  }else if(statusRefPointDrive == REF_STATE_LIFTOUT && refSwitch == HIGH){
-//    statusRefPointDrive = REF_STATE_LIFTOUT_SPACE;
-//    timer.after(2000,liftOutDone);
-//  }else if(statusRefPointDrive == REF_STATE_LIFTOUT_SPACE)  {
-//  /*  
-//   Remain in this step until liftOutDone time-out hits
-//     */
-//  }else if(statusRefPointDrive == REF_STATE_SEARCH && refSwitch == LOW){
-//    statusRefPointDrive = REF_STATE_DONE; 
-//    position = 0;
-//  }else if(statusRefPointDrive == REF_STATE_UNKNOWN && refSwitch == HIGH ){
-//    statusRefPointDrive = REF_STATE_SEARCH; 
-//  }
-//
-//  if( statusRefPointDrive == REF_STATE_LIFTOUT_SPACE || statusRefPointDrive == REF_STATE_LIFTOUT){
-//    motor->setSpeed(LOWSPEED);
-//    motor->step(1, AUF, DOUBLE);
-//   }else if (statusRefPointDrive == REF_STATE_SEARCH)  {
-//    motor->setSpeed(LOWSPEED);
-//    motor->step(1, AB, DOUBLE);    
-//   }else{
-//    motor->setSpeed(0);
-//    motor->release();
-//   }   
-//  
-//  return false;
-//}
-//
-//void resetRefPoint(){
-//  statusRefPointDrive = REF_STATE_UNKNOWN;
-//}
-//
+
 
 void terminateLiftOut();
 
@@ -255,10 +203,13 @@ public:
     }else if( state == STATE_SEARCH){
       if( refSwitchTouched){
         position = 0;
-        state = STATE_DONE;
+        state = STATE_GOTO_LOAD;
       }
+    }else if(state == STATE_GOTO_LOAD){
+      if( position >= limitUnten)
+        state = STATE_DONE;
     }else if( state == STATE_DONE){
-      
+      return true;
     }
     moveLift();
     return state == STATE_DONE ? true : false;
@@ -272,9 +223,11 @@ protected:
   {
 
     isMoving = true;    
-    if( state == STATE_LIFTOUT_SPACE || state == STATE_LIFTOUT){
+    if( state == STATE_LIFTOUT_SPACE || state == STATE_LIFTOUT || state == STATE_GOTO_LOAD){
       motor->setSpeed(LOWSPEED);
       motor->step(1, AUF, DOUBLE);      
+      if( state == STATE_GOTO_LOAD)
+        position ++;
      }else if (state == STATE_SEARCH)  {
       motor->setSpeed(LOWSPEED);
       motor->step(1, AB, DOUBLE);    
@@ -294,7 +247,8 @@ protected:
   const int STATE_LIFTOUT = 1;
   const int STATE_LIFTOUT_SPACE = 2;
   const int STATE_SEARCH = 3;
-  const int STATE_DONE = 4;
+  const int STATE_GOTO_LOAD = 4;
+  const int STATE_DONE = 5;
   
 };
 
@@ -394,6 +348,8 @@ void driveManual() {
 #define AUT_STATE_WAIT_FOR_UNLOAD 12
 #define AUT_STATE_MAKE_TIMEOUT 20
 #define AUT_STATE_REF_POINT 30
+#define AUT_STATE_WAIT 40
+#define AUT_STATE_ERROR 99
 
 
 class AutoPilot{
@@ -414,7 +370,7 @@ class AutoPilot{
   {
     if( state == AUT_STATE_WAIT_FOR_LOAD)
     {
-      if( TIMEOUT_DURATION <= 0){
+      if( TIMEOUT_DURATION <= 0 || timeOutEnabled == false){
         state = AUT_STATE_RAISE;
       }else{
         timer.after(TIMEOUT_DURATION,updatePilotFromTimer);
@@ -425,6 +381,10 @@ class AutoPilot{
     }else if( state == AUT_STATE_WAIT_FOR_UNLOAD){
       shouldPusherKick = false;
       state = AUT_STATE_LOWER;
+    }else if( state == AUT_STATE_REF_POINT){
+      refPoint.reset();
+      drive(DONTMOVE);
+      state = AUT_STATE_WAIT;
     }
   }
   
@@ -437,6 +397,7 @@ class AutoPilot{
     shouldPusherKick = false;
     state = AUT_STATE_UNKNOWN;
     moveCounter = 0;
+    refDriveRequested = false;
   }
   
   void update()
@@ -470,6 +431,10 @@ class AutoPilot{
       case AUT_STATE_WAIT_FOR_UNLOAD:
         stepWaitForUnLoad();
       break;  
+
+      case AUT_STATE_REF_POINT:
+        stepPrepareRefPoint();
+       break;
        
       default:
       ;
@@ -490,8 +455,9 @@ protected:
   int findFirstStep(){
     if( isLoaded == true)
       return AUT_STATE_RAISE;
-    else
+    else{
       return AUT_STATE_LOWER;
+    }
    }
 
 
@@ -499,20 +465,27 @@ protected:
    {
       if( drive(AB) == true){
         moveCounter++;
-        if( moveCounter >= MOVES_BEFORE_REF){
-          refPoint.reset();
+        if( moveCounter >= MOVES_BEFORE_REF || refDriveRequested == true){
+          refDriveRequested = false;
+          timer.after(1500,updatePilotFromTimer);
           state = AUT_STATE_REF_POINT;
         }else
           state = AUT_STATE_LOAD;
       }
    }
+
+  void stepPrepareRefPoint()
+  {
+    if( drive(AUF) == true)
+      state = AUT_STATE_ERROR;
+  }
    
   void stepLoad()
   {
     shouldCatcherOpen = true;
     if( isLoaded )
     {
-      timer.after(1000,updatePilotFromTimer);
+      timer.after(100,updatePilotFromTimer);
       state = AUT_STATE_WAIT_FOR_LOAD;
     }
   }
@@ -533,7 +506,7 @@ protected:
     shouldPusherKick = true;
     if( isLoaded == false )
     {
-      timerId = timer.after(2000,updatePilotFromTimer);
+      timerId = timer.after(1000,updatePilotFromTimer);
       state = AUT_STATE_WAIT_FOR_UNLOAD;
     }    
   }
@@ -591,6 +564,10 @@ protected:
   boolean shouldCatcherOpen = false;
   boolean shouldPusherKick = false;
 
+public:
+  boolean refDriveRequested = false;
+  boolean timeOutEnabled = false;
+
 };
 
 
@@ -614,8 +591,8 @@ void logStatus() {
     Serial.print(digitalRead(pinReference));
     Serial.print(" TS:");
     Serial.print(digitalRead(pinTaster));
-//    Serial.print(" RP:");
-//    Serial.print(statusRefPointDrive);    
+    Serial.print(" RP:");
+    Serial.print(refPoint.state);    
     if ( digitalRead(pinManualMode) == LOW)
       Serial.print(" Mode:M");
     else
@@ -662,6 +639,12 @@ void loop() {
     //Automatic
     if( refPoint.checkState() ){
       pilot.update();  
+      if( digitalRead(pinButtonDown) == LOW)
+        pilot.timeOutEnabled = false;
+      if( digitalRead(pinButtonUp) == LOW)
+        pilot.timeOutEnabled = true;
+      if( digitalRead(pinButtonSet) == LOW)
+        pilot.refDriveRequested = true;
     }else{
       pilot.updateManual();   
     }
