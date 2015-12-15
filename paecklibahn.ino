@@ -4,7 +4,7 @@
 #include <Servo.h>
 #include <Timer.h>
 
-int limitOben=2691;
+int limitOben=2699;
 int limitUnten=13;
 
 #define MOVES_BEFORE_REF 15
@@ -33,7 +33,7 @@ Servo servo1;
 
 
 /* *********   */
-#define SERVO_HOLD 90
+#define SERVO_HOLD 91
 #define SERVO_FORW 0
 #define SERVO_BACK 180
 #define MOVING_TIME 150
